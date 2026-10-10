@@ -465,11 +465,17 @@
           const c = readCoords({ children: [ring] });
           if (c.length) ringLatLngs.push(c);
         });
+        // Гарантуємо, що полігон буде хоч трохи видимий
+        const safeOpacity = Math.max(polyOpacity || 0, 0.25);
+        const safeColor = polyHex || lineHex;
         layer = L.polygon(ringLatLngs, {
           color: lineHex,
-          weight: 2,
-          fillColor: polyHex,
-          fillOpacity: polyOpacity,
+          weight: item.lineWidth || 2,
+          fillColor: safeColor,
+          fillOpacity: safeOpacity,
+          opacity: 0.9,
+          // Не даємо Leaflet прибрати прозорі fill
+          fill: true,
         });
       }
       if (layer) {
@@ -554,6 +560,24 @@
     await new Promise(r => setTimeout(r, 30));
     const placemarks = parseKML(text);
     if (!placemarks.length) throw new Error('KML не містить обʼєктів');
+
+    // Лічильники для дебагу
+    let totalGeom = 0, withPoints = 0, withPolygons = 0, withLines = 0;
+    placemarks.forEach(p => {
+      p.geometry.forEach(g => {
+        totalGeom++;
+        if (g.kind === 'point') withPoints++;
+        if (g.kind === 'polygon') withPolygons++;
+        if (g.kind === 'linestring') withLines++;
+      });
+    });
+    console.log('[Fronty] KML статистика:', {
+      placemarks: placemarks.length,
+      totalGeometryParts: totalGeom,
+      points: withPoints,
+      polygons: withPolygons,
+      lines: withLines,
+    });
 
     if (frontState.layer) map.removeLayer(frontState.layer);
     frontState.layer = L.layerGroup().addTo(map);
