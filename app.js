@@ -122,10 +122,11 @@
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
     { ...baseOpts, maxZoom: 19, attribution: 'Tiles © Esri' }
   );
-  // Схема як Google Maps — справжні тайли Google через спеціальний публічний endpoint
-  // Цей шар не потребує API-ключа для відображення (умовно безкоштовний для personal use)
+  // Схема як Google Maps — справжні тайли Google через публічний вектор-tile endpoint.
+  // Не потребує API-ключа (той самий endpoint, що працює в SkywatchUA).
+  // {s} — Leaflet підставляє subdomain з масиву, тож URL не має містити фіксованого mt0/mt1/etc.
   const layerGoogle = L.tileLayer(
-    'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
+    'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
     {
       ...baseOpts,
       maxZoom: 20,
@@ -171,7 +172,7 @@
   //   'https://pub-xxxxxx.r2.dev/kmzfile/Ukraine%20Analystic%20Map%20UAM.kmz'
   //   'https://my-bucket.r2.dev/front.kmz'
   //   'https://raw.githubusercontent.com/USER/REPO/main/front.kmz'
-  const FRONT_REMOTE_URL = 'http://localhost:3001/kmz';
+  const FRONT_REMOTE_URL = ''; // <- визначається автоматично через BACKEND_URL
 
   // Інтервал автооновлення (хвилини). 0 = вимкнено.
   const FRONT_REFRESH_MIN = 5;
@@ -188,6 +189,7 @@
     if (override) return override.replace(/\/+$/, '');
     if (typeof window !== 'undefined') {
       const host = window.location.hostname;
+      if (!host) return 'http://localhost:3001';
       if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3001';
       if (host.endsWith('.onrender.com')) {
         const base = host.replace('.onrender.com', '');
@@ -604,6 +606,12 @@
       }
       frontState.features.push(item);
     });
+
+    // Діагностика: скільки шарів додано в FeatureGroup
+    console.log('[fronty] додано шарів на карту:', frontState.layer.getLayers().length,
+      '(очікувалось ~', placemarks.length, ')');
+    const polyLayers = frontState.layer.getLayers().filter(l => l instanceof L.Polygon);
+    console.log('[fronty] полігонів на карті:', polyLayers.length);
 
     fCount.textContent = String(frontState.features.length);
     if (fit && frontState.bounds && frontState.bounds.isValid()) {
