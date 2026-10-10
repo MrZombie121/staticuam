@@ -453,20 +453,34 @@
     let bounds = null;
     const lineHex = colorToHex(item.lineColor) || '#f43f5e';
     const polyHex = colorToHex(item.polyColor) || '#7c3aed';
-    const polyOpacity = item.polyColor ? (parseFloat(item.polyColor.match(/[\d.]+\)$/)?.[0].slice(0, -1)) || 0.3) : 0.3;
+    const polyOpacity = item.polyColor ? (parseFloat(item.polyColor.match(/[\d.]+\)$/)?.[0].slice(0, -1)) || 0.3 : 0.3;
 
     item.geometry.forEach(g => {
       let pts;
       if (g.kind === 'polygon') {
-        // Для полігона НЕ викликаємо readCoords(g.node) — у KML <coordinates>
-        // лежить всередині <LinearRing>, а не напряму в <Polygon>.
-        const rings = g.node.querySelectorAll('LinearRing');
+        // У KML <coordinates> може лежати:
+        //   - напряму в <Polygon> (Google My Maps експорт)
+        //   - всередині <outerBoundaryIs><LinearRing> (стандарт)
+        // Тому пробуємо обидва варіанти.
         const ringLatLngs = [];
-        rings.forEach(ring => {
-          const c = readCoords(ring);
-          if (c.length) ringLatLngs.push(c);
-        });
-        if (!ringLatLngs.length) return; // нічого рендерити
+        // Варіант 1: <coordinates> прямо в <Polygon>
+        const directCoords = readCoords(g.node);
+        if (directCoords.length) {
+          ringLatLngs.push(directCoords);
+        } else {
+          // Варіант 2: шукаємо <LinearRing>
+          const rings = g.node.querySelectorAll('LinearRing');
+          rings.forEach(ring => {
+            const c = readCoords(ring);
+            if (c.length) ringLatLngs.push(c);
+          });
+        }
+        // Детальний лог для перших 3 полігонів
+        if (!window.__polyDiagLogged && item.name) {
+          console.log('[fronty:polygon-debug]', item.name, '→ directCoords=', directCoords?.length || 0, 'ringLatLngs=', ringLatLngs.length);
+          window.__polyDiagLogged = true;
+        }
+        if (!ringLatLngs.length) { window.__skippedPoly = (window.__skippedPoly || 0) + 1; return; } // нічого рендерити
         const safeOpacity = Math.max(polyOpacity || 0, 0.25);
         const safeColor = polyHex || lineHex;
         const layer = L.polygon(ringLatLngs, {
@@ -625,6 +639,7 @@
       '(очікувалось ~', placemarks.length, ')');
     const polyLayers = frontState.layer.getLayers().filter(l => l instanceof L.Polygon);
     console.log('[fronty] полігонів на карті:', polyLayers.length);
+    console.log('[fronty] пропущено полігонів через !ringLatLngs.length:', window.__skippedPoly || 0);
 
     fCount.textContent = String(frontState.features.length);
     if (fit && frontState.bounds && frontState.bounds.isValid()) {
