@@ -25,6 +25,6 @@ services:
     name: fronty-frontend
     runtime: static
     branch: main
-    buildCommand: ""
-    staticPublishPath: .
+    buildCommand: npm run build
+    publishPath: build
     autoDeploy: true
