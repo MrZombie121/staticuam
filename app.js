@@ -456,7 +456,39 @@
     const polyOpacity = item.polyColor ? (parseFloat(item.polyColor.match(/[\d.]+\)$/)?.[0].slice(0, -1)) || 0.3) : 0.3;
 
     item.geometry.forEach(g => {
-      const pts = readCoords(g.node);
+      let pts;
+      if (g.kind === 'polygon') {
+        // Для полігона НЕ викликаємо readCoords(g.node) — у KML <coordinates>
+        // лежить всередині <LinearRing>, а не напряму в <Polygon>.
+        const rings = g.node.querySelectorAll('LinearRing');
+        const ringLatLngs = [];
+        rings.forEach(ring => {
+          const c = readCoords(ring);
+          if (c.length) ringLatLngs.push(c);
+        });
+        if (!ringLatLngs.length) return; // нічого рендерити
+        const safeOpacity = Math.max(polyOpacity || 0, 0.25);
+        const safeColor = polyHex || lineHex;
+        const layer = L.polygon(ringLatLngs, {
+          color: lineHex,
+          weight: item.lineWidth || 2,
+          fillColor: safeColor,
+          fillOpacity: safeOpacity,
+          opacity: 0.9,
+          fill: true,
+        });
+        layer.bindPopup(buildPopupHtml(item), { maxWidth: 320, className: 'kml-popup' });
+        layer.on('popupopen', (e) => {
+          const btn = e.popup.getElement().querySelector('[data-act="zoom"]');
+          if (btn) btn.addEventListener('click', () => zoomToItem(item), { once: true });
+        });
+        layer.on('click', () => layer.openPopup());
+        layersArr.push(layer);
+        const b = layer.getBounds();
+        bounds = bounds ? bounds.extend(b) : L.latLngBounds(b);
+        return;
+      }
+      pts = readCoords(g.node);
       if (!pts.length) return;
       let layer;
       if (g.kind === 'point') {
@@ -466,25 +498,6 @@
           color: lineHex,
           weight: item.lineWidth || 3,
           opacity: 0.9,
-        });
-      } else if (g.kind === 'polygon') {
-        const rings = g.node.querySelectorAll('LinearRing');
-        const ringLatLngs = [];
-        rings.forEach(ring => {
-          const c = readCoords({ children: [ring] });
-          if (c.length) ringLatLngs.push(c);
-        });
-        // Гарантуємо, що полігон буде хоч трохи видимий
-        const safeOpacity = Math.max(polyOpacity || 0, 0.25);
-        const safeColor = polyHex || lineHex;
-        layer = L.polygon(ringLatLngs, {
-          color: lineHex,
-          weight: item.lineWidth || 2,
-          fillColor: safeColor,
-          fillOpacity: safeOpacity,
-          opacity: 0.9,
-          // Не даємо Leaflet прибрати прозорі fill
-          fill: true,
         });
       }
       if (layer) {
