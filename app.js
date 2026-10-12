@@ -438,23 +438,76 @@
     return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
   }
 
-  function buildPopupHtml(item) {
-    // Якщо є ExtendedData, формуємо красиву таблицю
-    let extraHtml = '';
-    if (item.extraFields && item.extraFields.length) {
-      const rows = item.extraFields
-        .filter(f => f.value && f.value.trim())
-        .map(f => `<tr><td>${escapeHtml(f.name)}</td><td>${escapeHtml(f.value)}</td></tr>`).join('');
-      if (rows) {
-        extraHtml = `<table class="pop-ext">${rows}</table>`;
+  // Витягує URL фото з опису (або з ExtraFields, якщо value — це картинка).
+  // Повертає масив {src, alt}[].
+  function extractPhotoUrls(item) {
+    const urls = [];
+    // 1. <img src="..."> в <description>
+    if (item.descriptionHtml) {
+      const re = /<img\b[^>]*\bsrc=["']([^"']+)["']/gi;
+      let m;
+      while ((m = re.exec(item.descriptionHtml)) !== null) {
+        urls.push({ src: m[1], alt: item.name });
       }
     }
-    const desc = item.descriptionHtml ? sanitizeHtml(item.descriptionHtml) : '';
+    // 2. Поле типу "фото" / "photo" / "image" з URL-значенням
+    if (item.extraFields) {
+      item.extraFields.forEach(f => {
+        if (!f.value) return;
+        const v = f.value.trim();
+        if (/^https?:\/\/\S+\.(?:jpe?g|png|gif|webp|avif|bmp|svg)(\?|$)/i.test(v)) {
+          if (!urls.some(u => u.src === v)) urls.push({ src: v, alt: f.name || item.name });
+        }
+      });
+    }
+    // 3. Якщо в ExtraFields значення — це просто URL без розширення, але ім'я поля канонічне
+    if (item.extraFields && !urls.length) {
+      const photoField = item.extraFields.find(f => /^(фото|photo|img|image|малюнок)/i.test(f.name || ''));
+      if (photoField && /^https?:\/\//i.test(photoField.value.trim())) {
+        urls.push({ src: photoField.value.trim(), alt: item.name });
+      }
+    }
+    return urls;
+  }
+
+  function buildPopupHtml(item) {
+    // Фото — витягуємо окремо, без санітизації (щоб не зламати <img>)
+    const photos = extractPhotoUrls(item);
+    const photosHtml = photos.length
+      ? `<div class="pop-photos">${photos.map(p => `<a href="${escapeHtml(p.src)}" target="_blank" rel="noopener"><img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.alt)}" loading="lazy" onerror="this.parentNode.style.display='none'"></a>`).join('')}</div>`
+      : '';
+
+    // ExtendedData — формуємо красиву таблицю, але прибираємо поле з URL фото,
+    // бо воно вже показане як зображення.
+    const photoSrcs = new Set(photos.map(p => p.src));
+    const filteredExtras = (item.extraFields || []).filter(f =>
+      f.value && f.value.trim() && !photoSrcs.has(f.value.trim())
+    );
+    let extraHtml = '';
+    if (filteredExtras.length) {
+      const rows = filteredExtras
+        .map(f => {
+          const v = f.value.trim();
+          // Якщо значення — це URL (не фото), показуємо як лінк
+          if (/^https?:\/\//i.test(v)) {
+            const linkText = v.length > 50 ? v.slice(0, 47) + '…' : v;
+            return `<tr><td>${escapeHtml(f.name)}</td><td><a href="${escapeHtml(v)}" target="_blank" rel="noopener">${escapeHtml(linkText)}</a></td></tr>`;
+          }
+          return `<tr><td>${escapeHtml(f.name)}</td><td>${escapeHtml(v)}</td></tr>`;
+        }).join('');
+      if (rows) extraHtml = `<table class="pop-ext">${rows}</table>`;
+    }
+
+    // Опис — санітизуємо, АЛЕ прибираємо <img> (вже вище показали як фото)
+    let desc = item.descriptionHtml ? sanitizeHtml(item.descriptionHtml) : '';
+    desc = desc.replace(/<img\b[^>]*>/gi, '');
+
     const meta = [];
     if (item.geometry.length > 1) meta.push(`<span>${item.geometry.length} частин</span>`);
     if (item.geometry[0]) meta.push(`<span>${kindLabel(item.geometry[0].kind)}</span>`);
     return `
       <h3 class="pop-title">${escapeHtml(item.name)}</h3>
+      ${photosHtml}
       ${desc ? `<div class="pop-desc">${desc}</div>` : ''}
       ${extraHtml}
       ${meta.length ? `<div class="pop-meta">${meta.join('')}</div>` : ''}
@@ -469,24 +522,40 @@
     return { point: 'Точка', linestring: 'Лінія', polygon: 'Полігон' }[k] || k;
   }
 
-  // Маркери для точок: гарна кольорова крапка з рамкою (divIcon — синхронно, без async)
-  // Ігноруємо iconHref з KML (там завжди одна й та сама gstatic-іконка),
-  // а реальний колір беремо з <IconStyle><color> у KML.
+  // Маркери для точок: сучасна пін-форма (капля) у стилі Google Maps.
+  // Колір беремо з <IconStyle><color> у KML (aabbggrr).
+  // Ігноруємо iconHref з KML (там завжди gstatic-іконка).
   function makePointIcon(item) {
     let c = '#ef4444'; // дефолт — червоний
     if (item.iconColor) {
-      // item.iconColor — це KML aabbggrr; parseKmlColor поверне rgba(...)
       const rgba = parseKmlColor(item.iconColor);
-      if (rgba) {
-        const hex = colorToHex(rgba);
-        if (hex) c = hex;
-      }
+      const hex = rgba ? colorToHex(rgba) : null;
+      if (hex) c = hex;
     }
+    // Підбираємо читабельний бордер: для світлих — темний, для темних — білий
+    const rgb = hexToRgb(c) || { r: 239, g: 68, b: 68 };
+    const lum = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+    const border = lum > 160 ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.95)';
+    const ring = lum > 160 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.35)';
+    // Каплевидна пін-форма: крапка + конус донизу
+    const html = `
+      <div class="pin-wrap">
+        <div class="pin-dot" style="background:${c};box-shadow:0 0 0 3px ${ring}, 0 0 0 5px ${ring}, 0 8px 16px rgba(0,0,0,0.4);"></div>
+        <div class="pin-stem" style="background:${c};"></div>
+      </div>
+    `;
     return L.divIcon({
       className: 'kml-marker',
-      html: `<div style="width:18px;height:18px;border-radius:50%;background:${c};border:3px solid #fff;box-shadow:0 0 0 4px ${c}55, 0 6px 14px rgba(0,0,0,0.45);"></div>`,
-      iconSize: [18, 18], iconAnchor: [9, 9],
+      html,
+      iconSize: [22, 32], iconAnchor: [11, 30], popupAnchor: [0, -28],
     });
+  }
+  // Парсер hex -> {r,g,b}
+  function hexToRgb(hex) {
+    if (!hex) return null;
+    const m = hex.replace('#','').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    if (!m) return null;
+    return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
   }
 
   function renderPlacemark(item) {

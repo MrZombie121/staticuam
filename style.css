@@ -308,6 +308,124 @@ button { font-family: inherit; }
 .tg-fab svg { width: 20px; height: 20px; }
 .tg-fab-label { white-space: nowrap; }
 
+/* ========== Маркери-точки (пін-форма) ========== */
+.kml-marker { background: transparent !important; border: 0 !important; }
+.kml-marker .pin-wrap {
+  position: relative;
+  width: 22px;
+  height: 32px;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.35));
+  transition: transform .12s ease;
+}
+.kml-marker:hover .pin-wrap { transform: translateY(-2px) scale(1.06); }
+.kml-marker .pin-dot {
+  position: absolute;
+  left: 4px; top: 0;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+}
+.kml-marker .pin-stem {
+  position: absolute;
+  left: 9px; top: 12px;
+  width: 4px; height: 14px;
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  transform: rotate(180deg);
+  margin-top: 2px;
+}
+
+/* ========== Покращений попап ========== */
+.leaflet-popup-content-wrapper { padding: 0; }
+.leaflet-popup-content { margin: 14px 16px 12px; max-width: 320px; }
+.pop-title {
+  font: 800 1.02rem 'Manrope', sans-serif;
+  margin: 0 0 10px;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+.pop-photos {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.pop-photos:has(a:nth-child(2)) { grid-template-columns: 1fr 1fr; }
+.pop-photos a {
+  display: block;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.04);
+  aspect-ratio: 16/10;
+  cursor: zoom-in;
+  transition: transform .15s ease;
+}
+.pop-photos a:hover { transform: scale(1.02); }
+.pop-photos img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 0;
+}
+.pop-desc {
+  color: #c4cce0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.pop-desc a { color: #7dd3fc; }
+.pop-ext {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 10px;
+  font-size: 0.84rem;
+}
+.pop-ext td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  vertical-align: top;
+}
+.pop-ext td:first-child {
+  color: #97a3c2;
+  font-weight: 600;
+  width: 38%;
+  white-space: nowrap;
+}
+.pop-ext td:last-child {
+  color: #e8ecf8;
+  word-break: break-word;
+}
+.pop-ext td a { color: #7dd3fc; text-decoration: none; }
+.pop-ext td a:hover { text-decoration: underline; }
+.pop-meta {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  font-size: 0.74rem;
+  margin-bottom: 8px;
+}
+.pop-meta span {
+  background: rgba(124, 58, 237, 0.18);
+  color: #c4b5fd;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.pop-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  background: linear-gradient(135deg, #7c3aed, #06b6d4);
+  color: #fff;
+  border: 0;
+  border-radius: 10px;
+  font: 700 0.84rem 'Manrope', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 6px 18px -6px rgba(124, 58, 237, 0.6);
+  transition: transform .12s, box-shadow .12s;
+}
+.pop-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 24px -8px rgba(124, 58, 237, 0.7); }
+.pop-btn:active { transform: translateY(0); }
+
 /* ========== Медіа-запити ========== */
 @media (max-width: 720px) {
   .layer-switch { top: 70px; right: 12px; }
