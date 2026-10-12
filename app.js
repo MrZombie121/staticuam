@@ -117,12 +117,6 @@
       history.replaceState(null, '', h);
     }
   }
-  // Відстежуємо, чи користувач вже взаємодіяв з мапою (рухав/зумив).
-  // Поки ні — flyToBounds при першому applyKmlText дозволено.
-  let userTouchedMap = false;
-  map.on('movestart zoomstart', () => {
-    if (hashWriteTimer) userTouchedMap = true;
-  });
   const initialView = readHashView();
   const map = L.map('map', {
     center: [initialView.lat, initialView.lng],
@@ -166,6 +160,13 @@
   const layers = { satellite: layerSatellite, roadmap: layerRoadmap, terrain: layerTerrain, google: layerGoogle };
   layers.satellite.addTo(map);
   let activeKey = 'satellite';
+
+  // Відстежуємо, чи користувач вже взаємодіяв з мапою (рухав/зумив).
+  // Поки ні — flyToBounds при першому applyKmlText дозволено.
+  let userTouchedMap = false;
+  map.on('movestart zoomstart', () => {
+    if (hashWriteTimer) userTouchedMap = true;
+  });
 
   function switchLayer(key) {
     if (key === activeKey && layers[key]) return;
