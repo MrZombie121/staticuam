@@ -133,21 +133,29 @@
   });
 
   const baseOpts = { crossOrigin: true, maxNativeZoom: 18, keepBuffer: 6 };
+  // Esri World Imagery — супутникові знімки
   const layerSatellite = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     { ...baseOpts, maxZoom: 19, attribution: 'Tiles © Esri' }
   );
+  // Esri World Street — класична схема
   const layerRoadmap = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
     { ...baseOpts, maxZoom: 19, attribution: 'Tiles © Esri' }
   );
+  // Google Terrain (рельєф) — справжні тайли Google без API-ключа.
+  // lyrs=p — terrain (рельєф, горизонталі), додаємо ,m — написи міст і дороги поверх.
+  // {s} — Leaflet підставляє subdomain.
   const layerTerrain = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-    { ...baseOpts, maxZoom: 19, attribution: 'Tiles © Esri' }
+    'https://{s}.google.com/vt/lyrs=p,m&x={x}&y={y}&z={z}',
+    {
+      ...baseOpts,
+      maxZoom: 20,
+      attribution: '© Google',
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    }
   );
-  // Схема як Google Maps — справжні тайли Google через публічний вектор-tile endpoint.
-  // Не потребує API-ключа (той самий endpoint, що працює в SkywatchUA).
-  // {s} — Leaflet підставляє subdomain з масиву, тож URL не має містити фіксованого mt0/mt1/etc.
+  // Google Maps Standard (схема) — lyrs=m
   const layerGoogle = L.tileLayer(
     'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',
     {
@@ -157,7 +165,18 @@
       subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
     }
   );
-  const layers = { satellite: layerSatellite, roadmap: layerRoadmap, terrain: layerTerrain, google: layerGoogle };
+  // Google Maps Dark — lyrs=h (тільки дорожня сітка на темному фоні, як у Google Maps Dark).
+  // Це публічний tile endpoint, без API-ключа (SkywatchUA так само робить).
+  const layerDark = L.tileLayer(
+    'https://{s}.google.com/vt/lyrs=h&x={x}&y={y}&z={z}',
+    {
+      ...baseOpts,
+      maxZoom: 20,
+      attribution: '© Google',
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    }
+  );
+  const layers = { satellite: layerSatellite, roadmap: layerRoadmap, terrain: layerTerrain, google: layerGoogle, dark: layerDark };
   layers.satellite.addTo(map);
   let activeKey = 'satellite';
 
@@ -350,9 +369,10 @@
         if (d.nodeName.toLowerCase() !== 'data') return;
         const n = d.getAttribute('name') || '';
         const v = d.querySelector('value');
-        if (v && v.textContent.trim()) {
-          extraFields.push({ name: n, value: v.textContent.trim() });
-        }
+        // Додаємо поле завжди (навіть з порожнім value), щоб у попапі
+        // користувач бачив структуру шаблону з Google My Maps.
+        const value = v ? v.textContent.trim() : '';
+        extraFields.push({ name: n, value });
       });
     }
 
@@ -478,7 +498,8 @@
       : '';
 
     // ExtendedData — формуємо красиву таблицю, але прибираємо поле з URL фото,
-    // бо воно вже показане як зображення.
+    // бо воно вже показане як зображення. Поля з порожнім value ігноруємо
+    // повністю (інакше таблиця забивається прочерками).
     const photoSrcs = new Set(photos.map(p => p.src));
     const filteredExtras = (item.extraFields || []).filter(f =>
       f.value && f.value.trim() && !photoSrcs.has(f.value.trim())
@@ -522,7 +543,7 @@
     return { point: 'Точка', linestring: 'Лінія', polygon: 'Полігон' }[k] || k;
   }
 
-  // Маркери для точок: сучасна пін-форма (капля) у стилі Google Maps.
+  // Маркери для точок: кругла крапка з подвійним кільцем і drop-shadow.
   // Колір беремо з <IconStyle><color> у KML (aabbggrr).
   // Ігноруємо iconHref з KML (там завжди gstatic-іконка).
   function makePointIcon(item) {
@@ -532,22 +553,16 @@
       const hex = rgba ? colorToHex(rgba) : null;
       if (hex) c = hex;
     }
-    // Підбираємо читабельний бордер: для світлих — темний, для темних — білий
+    // Підбираємо читабельний бордер і кільце: для світлих кольорів — темні,
+    // для темних — білі (щоб крапка не зливалася з тлом).
     const rgb = hexToRgb(c) || { r: 239, g: 68, b: 68 };
     const lum = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
-    const border = lum > 160 ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.95)';
-    const ring = lum > 160 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.35)';
-    // Каплевидна пін-форма: крапка + конус донизу
-    const html = `
-      <div class="pin-wrap">
-        <div class="pin-dot" style="background:${c};box-shadow:0 0 0 3px ${ring}, 0 0 0 5px ${ring}, 0 8px 16px rgba(0,0,0,0.4);"></div>
-        <div class="pin-stem" style="background:${c};"></div>
-      </div>
-    `;
+    const border = lum > 160 ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.95)';
+    const ring = lum > 160 ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)';
     return L.divIcon({
       className: 'kml-marker',
-      html,
-      iconSize: [22, 32], iconAnchor: [11, 30], popupAnchor: [0, -28],
+      html: `<span class="kml-dot" style="width:20px;height:20px;display:block;border-radius:50%;background:${c};border:3px solid ${border};box-shadow:0 0 0 3px ${ring}, 0 6px 14px rgba(0,0,0,0.4);"></span>`,
+      iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -12],
     });
   }
   // Парсер hex -> {r,g,b}
@@ -556,6 +571,19 @@
     const m = hex.replace('#','').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
     if (!m) return null;
     return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+  }
+  // Освітлює/затемнює колір. amount: -1..1 (-1 = чорний, 1 = білий)
+  function shadeColor(hex, amount) {
+    const c = hexToRgb(hex);
+    if (!c) return hex;
+    const blend = (v) => {
+      if (amount >= 0) return Math.round(v + (255 - v) * amount);
+      return Math.round(v * (1 + amount));
+    };
+    const r = blend(c.r).toString(16).padStart(2, '0');
+    const g = blend(c.g).toString(16).padStart(2, '0');
+    const b = blend(c.b).toString(16).padStart(2, '0');
+    return '#' + r + g + b;
   }
 
   function renderPlacemark(item) {
@@ -598,15 +626,21 @@
           window.__polyDiagLogged = true;
         }
         if (!ringLatLngs.length) { window.__skippedPoly = (window.__skippedPoly || 0) + 1; return; } // нічого рендерити
-        const safeOpacity = Math.max(polyOpacity || 0, 0.25);
+        const safeOpacity = Math.max(polyOpacity || 0, 0.3);
         const safeColor = polyHex || lineHex;
+        // Вибираємо контрастний border: якщо fill світлий — темний border, і навпаки.
+        const polyRgb = hexToRgb(safeColor) || { r: 124, g: 58, b: 237 };
+        const polyLum = 0.2126 * polyRgb.r + 0.7152 * polyRgb.g + 0.0722 * polyRgb.b;
+        const borderColor = polyLum > 150 ? shadeColor(safeColor, -0.45) : shadeColor(safeColor, 0.25);
         const layer = L.polygon(ringLatLngs, {
-          color: lineHex,
-          weight: item.lineWidth || 2,
+          color: borderColor,
+          weight: Math.max(item.lineWidth || 1, 2.2),
           fillColor: safeColor,
           fillOpacity: safeOpacity,
-          opacity: 0.9,
+          opacity: 1,
           fill: true,
+          className: 'kml-poly',
+          smoothFactor: 1.2,
         });
         layer.bindPopup(buildPopupHtml(item), { maxWidth: 320, className: 'kml-popup' });
         layer.on('popupopen', (e) => {
@@ -614,6 +648,9 @@
           if (btn) btn.addEventListener('click', () => zoomToItem(item), { once: true });
         });
         layer.on('click', () => layer.openPopup());
+        // Hover — підсвічування через зміну opacity
+        layer.on('mouseover', () => layer.setStyle({ fillOpacity: Math.min(0.9, safeOpacity + 0.25), weight: 3.2 }));
+        layer.on('mouseout',  () => layer.setStyle({ fillOpacity: safeOpacity, weight: Math.max(item.lineWidth || 1, 2.2) }));
         layersArr.push(layer);
         const b = layer.getBounds();
         bounds = bounds ? bounds.extend(b) : L.latLngBounds(b);
