@@ -453,7 +453,14 @@
     let bounds = null;
     const lineHex = colorToHex(item.lineColor) || '#f43f5e';
     const polyHex = colorToHex(item.polyColor) || '#7c3aed';
-    const polyOpacity = item.polyColor ? (parseFloat(item.polyColor.match(/[\d.]+\)$/)?.[0].slice(0, -1)) || 0.3 : 0.3;
+    let polyOpacity = 0.3;
+    if (item.polyColor) {
+      const m = item.polyColor.match(/[\d.]+\)$/);
+      if (m) {
+        const v = parseFloat(m[0].slice(0, -1));
+        if (Number.isFinite(v)) polyOpacity = v;
+      }
+    }
 
     item.geometry.forEach(g => {
       let pts;
