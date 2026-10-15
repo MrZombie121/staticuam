@@ -263,6 +263,126 @@
 
   const BACKEND_WS = BACKEND_URL.replace(/^http/, 'ws') + '/ws';
 
+  // ========== Стан шарів (Folders з KML) ==========
+  const layerState = { kmlLayers: [] };
+  function isLayerEnabled(name) {
+    const l = layerState.kmlLayers.find(x => x.name === name);
+    return l ? !!l.enabled : true;
+  }
+  function toggleLayer(name, on) {
+    const l = layerState.kmlLayers.find(x => x.name === name);
+    if (l) { l.enabled = !!on; applyLayerVisibility(); renderLayerPanel(); }
+  }
+  function applyLayerVisibility() {
+    if (!frontState.layer) return;
+    frontState.layer.eachLayer(l => {
+      if (!l || !l._frontItem) return;
+      const ln = l._frontItem._layer || '(Корінь)';
+      const want = isLayerEnabled(ln);
+      if (want) { if (!map.hasLayer(l)) l.addTo(map); }
+      else { if (map.hasLayer(l)) map.removeLayer(l); }
+    });
+  }
+  function renderLayerPanel() {
+    const el = document.getElementById('layerPanelList');
+    const lc = document.getElementById('layerCount');
+    if (lc) lc.textContent = String(layerState.kmlLayers.length);
+    if (!el) return;
+    if (!layerState.kmlLayers.length) {
+      el.innerHTML = '<div class="muted" style="padding:8px 0;font-size:0.82rem;">KML не містить шарів</div>';
+      return;
+    }
+    el.innerHTML = layerState.kmlLayers.map(l => {
+      const checked = l.enabled ? 'checked' : '';
+      const eye = l.enabled ? '👁' : '🚫';
+      return '<label class="layer-row">' +
+        '<input type="checkbox" data-layer="' + escapeHtml(l.name) + '" ' + checked + '>' +
+        '<span class="layer-eye">' + eye + '</span>' +
+        '<span class="layer-name">' + escapeHtml(l.name) + '</span>' +
+        '<span class="layer-count">' + l.count + '</span>' +
+        '</label>';
+    }).join('');
+    el.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => toggleLayer(cb.dataset.layer, cb.checked));
+    });
+  }
+  function setupLayerPanel() {
+    const tog = document.getElementById('layerToggle');
+    const body = document.getElementById('layerPanelList');
+    if (!tog) return;
+    tog.addEventListener('click', () => {
+      const exp = tog.getAttribute('aria-expanded') === 'true';
+      tog.setAttribute('aria-expanded', String(!exp));
+      if (body) body.style.display = exp ? 'none' : 'block';
+    });
+  }
+
+  // ========== Вибір дати (зріз фронту) ==========
+  let currentDate = null;
+  async function loadDateList() {
+    const body = document.getElementById('dateBody');
+    if (!body) return;
+    try {
+      const r = await fetch(BACKEND_URL + '/api/history', { cache: 'no-store' });
+      const j = await r.json();
+      renderDateList(j.history || [], j.current || null);
+    } catch (e) {
+      body.innerHTML = '<div class="muted" style="padding:6px 2px;font-size:0.78rem;color:#fda4af;">Бекенд недоступний</div>';
+    }
+  }
+  function renderDateList(history, current) {
+    const body = document.getElementById('dateBody');
+    const head = document.getElementById('dateCurrent');
+    const panel = document.getElementById('datePanel');
+    if (!body) return;
+    if (!history.length) {
+      if (panel) panel.style.display = 'none';
+      return;
+    }
+    if (panel) panel.style.display = 'block';
+    const currentRel = (current && current.relPath) || '';
+    let shownDate;
+    if (currentDate) shownDate = currentDate;
+    else if (currentRel) shownDate = currentRel.split('/')[0];
+    else shownDate = history[0].date;
+    if (head) head.textContent = shownDate;
+    const items = ['<div class="dp-item" data-date="">' +
+      '<span>📅</span><span class="dp-date">Останній доступний</span>' +
+      (currentDate === null ? ' <span style="color:#7dd3fc;">●</span>' : '') +
+      '</div>'];
+    for (const day of history) {
+      for (const f of day.files) {
+        const isCur = f.relPath === currentRel;
+        items.push('<div class="dp-item ' + (currentDate === day.date ? 'is-current' : '') + '" data-date="' + day.date + '">' +
+          '<span>📄</span>' +
+          '<span class="dp-date">' + day.date + ' · ' + f.time + '</span>' +
+          (isCur && currentDate === null ? ' <span style="color:#7dd3fc;">●</span>' : '') +
+          '</div>');
+      }
+    }
+    body.innerHTML = items.join('');
+    body.querySelectorAll('.dp-item').forEach(el => {
+      el.addEventListener('click', () => {
+        currentDate = el.dataset.date || null;
+        document.getElementById('dateToggle').setAttribute('aria-expanded', 'false');
+        body.setAttribute('hidden', '');
+        loadFrontAuto(true);
+        renderDateList(history, current);
+      });
+    });
+  }
+  function setupDatePanel() {
+    const tog = document.getElementById('dateToggle');
+    const body = document.getElementById('dateBody');
+    if (!tog || !body) return;
+    tog.addEventListener('click', () => {
+      const exp = tog.getAttribute('aria-expanded') === 'true';
+      tog.setAttribute('aria-expanded', String(!exp));
+      if (exp) body.setAttribute('hidden', ''); else body.removeAttribute('hidden');
+    });
+    loadDateList();
+  }
+
   const frontState = {
     enabled: true,
     layer: null,
@@ -294,7 +414,7 @@
     }
   }
 
-  // Парсер KML
+  // Парсер KML — повертає { placemarks, layers }
   function parseKML(xmlText) {
     const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
     const errNode = doc.querySelector('parsererror');
@@ -303,34 +423,37 @@
     if (!root || root.nodeName.toLowerCase() !== 'kml') {
       throw new Error('Кореневий тег не <kml>');
     }
-    // Збираємо всі <Style> і <StyleMap> за id для резолву styleUrl
     const styles = {};
     doc.querySelectorAll('Style, StyleMap').forEach(s => {
       const id = s.getAttribute('id');
       if (id) styles[id] = s;
     });
     const allPlacemarks = [];
-    collectPlacemarks(root, styles, allPlacemarks);
-    return allPlacemarks;
+    const layers = [];
+    collectPlacemarks(root, styles, '(Корінь)', allPlacemarks, layers);
+    return { placemarks: allPlacemarks, layers };
   }
 
-  function collectPlacemarks(node, styles, out) {
+  function collectPlacemarks(node, styles, layerName, out, layers) {
     Array.from(node.children).forEach(child => {
       const tag = child.nodeName.toLowerCase();
-      if (tag === 'placemark') out.push(readPlacemark(child, styles));
-      else if (tag === 'folder' || tag === 'document') {
-        collectPlacemarks(child, styles, out);
+      if (tag === 'placemark') {
+        const item = readPlacemark(child, styles);
+        item._layer = layerName;
+        out.push(item);
+      } else if (tag === 'folder') {
+        const folderName = textOf(child, 'name') || 'Без назви';
+        const before = out.length;
+        const subLayers = [];
+        collectPlacemarks(child, styles, folderName, out, subLayers);
+        const count = out.length - before;
+        if (count > 0) layers.push({ name: folderName, count, enabled: true });
+        for (const sl of subLayers) layers.push(sl);
+      } else if (tag === 'document') {
+        collectPlacemarks(child, styles, layerName, out, layers);
       } else if (tag === 'networklink') {
-        // NetworkLink — це лінк на інший KML, всередині нього даних немає.
-        // Збережемо URL для KML_SOURCES як додаткове джерело.
         const href = child.querySelector('Link > href, link > href');
-        if (href) {
-          const url = href.textContent.trim();
-          if (url && !KML_SOURCES.some(fn => fn() === url)) {
-            console.log('[Fronty] NetworkLink →', url);
-            // Не додаємо динамічно (KML_SOURCES const), але можемо показати підказку
-          }
-        }
+        if (href) console.log('[Fronty] NetworkLink →', href.textContent.trim());
       }
     });
   }
@@ -705,16 +828,15 @@
   })();
 
   const KML_SOURCES = [
-    // 1. Бекенд (Render або локальний)
-    () => REMOTE_BASE ? REMOTE_BASE + '?t=' + Date.now() : null,
-    // 2. Локальний файл у папці сайту. Перевіряємо кілька варіантів імен.
+    // 1. Бекенд: API з параметром дати, або /kmz (поточний)
+    () => BACKEND_URL + (currentDate ? `/api/kmz?date=${encodeURIComponent(currentDate)}&t=` : '/kmz?t=') + Date.now(),
+    // 2. Локальний файл
     () => `./Ukraine%20Analystic%20Map%20UAM.kmz?t=${Date.now()}`,
-    () => `./Ukraine Analystic Map UAM.kmz?t=${Date.now()}`,
     () => `./front.kmz?t=${Date.now()}`,
     () => `./front.kml?t=${Date.now()}`,
-    // 3. Google напряму (CORS блокує з браузера, але про всяк випадок)
+    // 3. Google напряму
     () => `https://www.google.com/maps/d/kml?mid=${KML_MID}&forcekml=1`,
-  ].filter(fn => fn); // null-и викидаємо
+  ].filter(fn => fn);
 
   // Віддалений URL твого KMZ. Залиш порожнім, якщо кладеш файл локально.
   // Приклади:
@@ -746,10 +868,11 @@
   }
 
   async function applyKmlText(text, { fit = true } = {}) {
-    const placemarks = parseKML(text);
+    const parsed = parseKML(text);
+    const placemarks = Array.isArray(parsed) ? parsed : parsed.placemarks;
+    const kmlLayers = (parsed && parsed.layers) || [];
     if (!placemarks.length) throw new Error('KML не містить обʼєктів');
 
-    // Лічильники для дебагу
     let totalGeom = 0, withPoints = 0, withPolygons = 0, withLines = 0;
     placemarks.forEach(p => {
       p.geometry.forEach(g => {
@@ -765,6 +888,7 @@
       points: withPoints,
       polygons: withPolygons,
       lines: withLines,
+      kmlLayers: kmlLayers.length,
     });
 
     if (frontState.layer) map.removeLayer(frontState.layer);
@@ -772,18 +896,23 @@
     frontState.features = [];
     frontState.bounds = null;
 
+    layerState.kmlLayers = kmlLayers.map(l => ({ ...l, enabled: true }));
+    renderLayerPanel();
+
     placemarks.forEach((item, i) => {
       const { layers: ll, bounds } = renderPlacemark(item);
+      const layerName = item._layer || '(Корінь)';
+      const visible = isLayerEnabled(layerName);
       ll.forEach(l => {
         l._frontItem = item;
-        frontState.layer.addLayer(l);
+        if (visible) frontState.layer.addLayer(l);
       });
-      if (bounds && bounds.isValid()) {
+      if (bounds && bounds.isValid() && visible) {
         frontState.bounds = frontState.bounds
           ? frontState.bounds.extend(bounds)
           : L.latLngBounds(bounds);
       }
-      frontState.features.push(item);
+      if (visible) frontState.features.push(item);
     });
 
     // Діагностика: скільки шарів додано в FeatureGroup
@@ -965,15 +1094,23 @@
   });
 
   // ============================================================
-  //  ЛІНІЙКА
+  //  ЛІНІЙКА + ПЛОЩА
   // ============================================================
   const measure = { active: false, points: [], polyline: null, segmentLines: [], markers: [], totalMeters: 0 };
+  const area    = { active: false, points: [], poly: null, markers: [] };
   const rToggle = document.getElementById('rulerToggle');
-  const rClear = document.getElementById('rulerClear');
-  const rTotal = document.getElementById('rTotal');
-  const rHint = document.getElementById('rHint');
+  const aToggle = document.getElementById('areaToggle');
+  const rClear  = document.getElementById('rulerClear');
+  const rTotal  = document.getElementById('rTotal');
+  const rHint   = document.getElementById('rHint');
+  const rLabel  = document.getElementById('rLabel');
 
   function fmt(m) { return m < 1000 ? `${Math.round(m)} м` : `${(m/1000).toFixed(2)} км`; }
+  function fmtArea(m2) {
+    if (m2 < 10000) return Math.round(m2) + ' м²';
+    if (m2 < 1e6)   return (m2/10000).toFixed(2) + ' га';
+    return (m2/1e6).toFixed(3) + ' км²';
+  }
   function haversine(a, b) {
     const R = 6371000, toRad = d => d * Math.PI / 180;
     const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
@@ -981,6 +1118,36 @@
     const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;
     return 2 * R * Math.asin(Math.sqrt(h));
   }
+  function ringAreaSqm(latlngs) {
+    if (latlngs.length < 3) return 0;
+    const R = 6378137;
+    let total = 0;
+    for (let i = 0; i < latlngs.length; i++) {
+      const a = latlngs[i], b = latlngs[(i+1) % latlngs.length];
+      total += (b.lng - a.lng) * Math.PI/180 *
+        (2 + Math.sin(a.lat*Math.PI/180) + Math.sin(b.lat*Math.PI/180));
+    }
+    return Math.abs(total * R * R / 2);
+  }
+
+  // Блокування кліків на плейсмарках під час вимірювання
+  function setFrontInteractionBlocked(blocked) {
+    if (!frontState.layer) return;
+    frontState.layer.eachLayer(l => {
+      if (!l) return;
+      if (blocked) {
+        if (l._origClick) return;
+        const ev = l._events;
+        l._origClick = ev && ev.click ? ev.click.slice() : [];
+        l.off('click');
+        if (l.closePopup) l.closePopup();
+      } else if (l._origClick) {
+        l._origClick.forEach(h => l.on('click', h.handler || h));
+        l._origClick = null;
+      }
+    });
+  }
+
   function clearMeasure() {
     if (measure.polyline) map.removeLayer(measure.polyline);
     measure.segmentLines.forEach(l => map.removeLayer(l));
@@ -989,21 +1156,31 @@
     measure.points = []; measure.totalMeters = 0;
     updateTotal();
   }
+  function clearArea() {
+    if (area.poly) map.removeLayer(area.poly);
+    area.markers.forEach(m => map.removeLayer(m));
+    area.poly = null; area.markers = []; area.points = [];
+  }
+
   function updateTotal() {
+    if (area.active) return;
     rTotal.textContent = fmt(measure.totalMeters);
+    rLabel.textContent = 'Загалом';
     if (measure.active && measure.points.length > 0) {
       rHint.textContent = `Точок: ${measure.points.length}. Подвійний клік — завершити, Esc — вийти.`;
     } else if (measure.active) {
       rHint.textContent = 'Клікни по карті, щоб поставити першу точку';
     } else {
-      rHint.textContent = 'Натисни «Лінійка», потім клікай по карті';
+      rHint.textContent = 'Натисни «Лінійка» або «Площа»';
     }
   }
   function startMeasure() {
+    if (area.active) stopArea();
     measure.active = true;
     map.getContainer().classList.add('ruler-on');
     rToggle.classList.add('active');
     rToggle.setAttribute('aria-pressed', 'true');
+    setFrontInteractionBlocked(true);
     updateTotal();
   }
   function stopMeasure() {
@@ -1011,6 +1188,7 @@
     map.getContainer().classList.remove('ruler-on');
     rToggle.classList.remove('active');
     rToggle.setAttribute('aria-pressed', 'false');
+    setFrontInteractionBlocked(false);
     updateTotal();
   }
   function addPoint(latlng) {
@@ -1034,16 +1212,81 @@
     }
     updateTotal();
   }
-  map.on('click', (e) => { if (measure.active) addPoint(e.latlng); });
-  map.on('dblclick', () => { if (measure.active) stopMeasure(); });
-  rToggle.addEventListener('click', () => { if (measure.active) stopMeasure(); else startMeasure(); });
-  rClear.addEventListener('click', () => { clearMeasure(); stopMeasure(); });
+
+  function startArea() {
+    if (measure.active) stopMeasure();
+    area.active = true;
+    map.getContainer().classList.add('ruler-on');
+    aToggle.classList.add('active');
+    aToggle.setAttribute('aria-pressed', 'true');
+    setFrontInteractionBlocked(true);
+    rLabel.textContent = 'Площа';
+    rTotal.textContent = '0 м²';
+    rHint.textContent = 'Клікни по карті, щоб додати вершину (потрібно ≥ 3). Подвійний клік — завершити.';
+  }
+  function stopArea() {
+    area.active = false;
+    map.getContainer().classList.remove('ruler-on');
+    aToggle.classList.remove('active');
+    aToggle.setAttribute('aria-pressed', 'false');
+    setFrontInteractionBlocked(false);
+    updateTotal();
+  }
+  function addAreaPoint(latlng) {
+    const n = area.points.length + 1;
+    area.points.push(latlng);
+    const marker = L.circleMarker(latlng, {
+      radius: 5, color: '#06b6d4', weight: 3, fillColor: '#fff', fillOpacity: 1,
+    }).addTo(map).bindTooltip(String(n), { permanent: true, direction: 'top', offset: [0, -8], className: 'seg-tip' });
+    area.markers.push(marker);
+    if (area.poly) map.removeLayer(area.poly);
+    if (area.points.length >= 2) {
+      area.poly = L.polygon(area.points, {
+        color: '#06b6d4', weight: 2, fillColor: '#06b6d4', fillOpacity: 0.18, dashArray: '4 4',
+      }).addTo(map);
+    }
+    if (area.points.length >= 3) {
+      const a = ringAreaSqm(area.points);
+      rTotal.textContent = fmtArea(a);
+      rHint.textContent = `Вершин: ${area.points.length}. Площа: ${fmtArea(a)}. Подвійний клік — завершити.`;
+    } else {
+      rHint.textContent = `Вершин: ${area.points.length}. Потрібно ≥ 3 для площі.`;
+    }
+  }
+
+  map.on('click', (e) => {
+    if (measure.active) { addPoint(e.latlng); return; }
+    if (area.active)    { addAreaPoint(e.latlng); return; }
+  });
+  map.on('dblclick', (e) => {
+    if (measure.active) { stopMeasure(); e.originalEvent && e.originalEvent.preventDefault(); return; }
+    if (area.active)    { stopArea();    e.originalEvent && e.originalEvent.preventDefault(); return; }
+  });
+  rToggle.addEventListener('click', () => {
+    if (area.active) stopArea();
+    if (measure.active) { stopMeasure(); return; }
+    startMeasure();
+  });
+  aToggle.addEventListener('click', () => {
+    if (measure.active) stopMeasure();
+    if (area.active) { stopArea(); return; }
+    startArea();
+  });
+  rClear.addEventListener('click', () => {
+    clearMeasure(); clearArea();
+    if (measure.active) stopMeasure();
+    if (area.active) stopArea();
+  });
   document.addEventListener('keydown', (e) => {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') {
+      if (area.active) stopArea();
       if (measure.active) stopMeasure(); else startMeasure();
-    } else if (e.key === 'Escape') stopMeasure();
+    } else if (e.key === 'Escape') {
+      if (measure.active) stopMeasure();
+      if (area.active) stopArea();
+    }
   });
 
   // ============================================================
@@ -1157,9 +1400,10 @@
           const msg = JSON.parse(e.data);
           if (msg.type === 'kmz-updated') {
             console.log('[WS] Оновлення KMZ від бекенда:', msg);
-            loadFrontAuto(false);
+            loadDateList();
+            if (currentDate === null) loadFrontAuto(false);
           } else if (msg.type === 'hello') {
-            console.log('[WS] Привіт від бекенда, розмір=%.1f КБ', (msg.kmzSize || 0) / 1024);
+            console.log('[WS] Привіт від бекенда');
           }
         } catch (err) {
           console.warn('[WS] Невідомий формат:', e.data);
@@ -1178,6 +1422,8 @@
     }
   }
   connectWs();
+  setupLayerPanel();
+  setupDatePanel();
 
   // === Polling fallback (на випадок якщо WS недоступний) ===
   if (FRONT_REFRESH_MIN > 0) {

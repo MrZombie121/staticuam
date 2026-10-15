@@ -87,19 +87,41 @@
   <!-- Статус завантаження KML -->
   <div class="front-status" id="frontStatus" hidden></div>
 
-  <!-- Панель лінійки -->
+  <!-- Панель лінійки / площі -->
   <div class="ruler-panel glass" id="rulerPanel">
-    <button class="rp-toggle" id="rulerToggle" type="button" aria-pressed="false">
+    <button class="rp-toggle" id="rulerToggle" type="button" aria-pressed="false" title="Виміряти відстань">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 8.7 8.7 21.3a4 4 0 0 1-5.6 0L2.7 21a4 4 0 0 1 0-5.6L15.3 2.7a4 4 0 0 1 5.6 0L21 2.8a4 4 0 0 1 0 5.6z"/><path d="m7.5 10.5 2 2"/><path d="m10.5 7.5 2 2"/><path d="m13.5 4.5 2 2"/><path d="m4.5 13.5 2 2"/></svg>
       <span>Лінійка</span>
     </button>
+    <button class="rp-toggle" id="areaToggle" type="button" aria-pressed="false" title="Виміряти площу">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 3v18M3 15h18M15 3v18"/></svg>
+      <span>Площа</span>
+    </button>
     <div class="rp-info">
-      <div class="rp-total"><span>Загалом</span><strong id="rTotal">0 м</strong></div>
+      <div class="rp-total"><span id="rLabel">Загалом</span><strong id="rTotal">0 м</strong></div>
       <div class="rp-hint" id="rHint">Натисни «Лінійка», потім клікай по карті</div>
     </div>
     <button class="rp-clear" id="rulerClear" type="button" title="Очистити">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6 18 20a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
     </button>
+  </div>
+
+  <!-- Панель дат (зрізи фронту) -->
+  <div class="date-panel glass" id="datePanel">
+    <button class="dp-head" id="dateToggle" type="button" aria-expanded="false">
+      <span>📅 <strong id="dateCurrent">сьогодні</strong></span>
+      <span class="dp-caret">▾</span>
+    </button>
+    <div class="dp-body" id="dateBody" hidden></div>
+  </div>
+
+  <!-- Панель шарів (Folders із KML) -->
+  <div class="layer-panel glass" id="layerPanel">
+    <button class="lp-head" id="layerToggle" type="button" aria-expanded="true">
+      <span>📚 Шари</span>
+      <span class="lp-count" id="layerCount">0</span>
+    </button>
+    <div class="lp-body" id="layerPanelList"></div>
   </div>
 
   <!-- Telegram -->
